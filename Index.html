@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Kingdom Chore App</title>
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#fdf2f8">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    animation: { 'spin-slow': 'spin 3s linear infinite', 'float': 'float 3s ease-in-out infinite' },
+                    keyframes: { float: { '0%, 100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-10px)' } } },
+                    colors: { themeYellow: '#fef08a', themeYellowDark: '#854d0e', themeBlue: '#bfdbfe', themeBlueDark: '#1e40af' },
+                    boxShadow: { 'cute': '0 4px 0 0 rgba(0,0,0,0.05)', 'glow': '0 0 20px rgba(255, 255, 255, 0.8)' }
+                }
+            }
+        }
+    </script>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.378.0",
+        "firebase/app": "https://esm.sh/firebase@10.12.0/app",
+        "firebase/auth": "https://esm.sh/firebase@10.12.0/auth",
+        "firebase/firestore": "https://esm.sh/firebase@10.12.0/firestore"
+      }
+    }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        ::-webkit-scrollbar { width: 0px; background: transparent; } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        body { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; background-color: #fdf2f8; background-image: radial-gradient(#fbcfe8 2px, transparent 2px); background-size: 24px 24px; height: 100vh; height: 100dvh; width: 100vw; overflow: hidden; overscroll-behavior: none; }
+        input, textarea, select { -webkit-user-select: auto; user-select: auto; } .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); } .pt-safe-top { padding-top: env(safe-area-inset-top); }
+    </style>
+</head>
+<body>
+    <div id="error-container" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.95); color:red; z-index:9999; padding:20px; overflow:auto;">
+        <h2 style="font-size:20px; font-weight:bold;">Something went wrong</h2>
+        <pre id="error-message" style="margin-top:10px; background:#f0f0f0; padding:10px; border-radius:10px;"></pre>
+        <button onclick="window.location.reload()" style="margin-top:20px; padding:10px 20px; background:black; color:white; border-radius:10px; font-weight:bold;">Reload App</button>
+    </div>
+
+    <div id="root" class="h-full w-full"></div>
+
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            document.getElementById('error-container').style.display = 'block';
+            document.getElementById('error-message').innerText = `${msg}\n\nLine: ${line}`;
+            return false;
+        };
+        console.log("App starting...");
+    </script>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { Heart, Trash2, Plus, CheckCircle, ArrowLeft, RefreshCw, LogOut, X, PiggyBank, Target, CheckSquare, DollarSign, Crown, Settings, Gift, Loader2 } from 'lucide-react';
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
+        import { getFirestore, collection, doc, onSnapshot, addDoc, updateDoc, deleteDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+
+        // --- FIREBASE CONFIG ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDou6KkbunVRZrgwf8dM2-Fzooa9hmzHqg",
+            authDomain: "ourkingdom-40ac4.firebaseapp.com",
+            projectId: "ourkingdom-40ac4",
+            storageBucket: "ourkingdom-40ac4.firebasestorage.app",
+            messagingSenderId: "692420321112",
+            appId: "1:692420321112:web:c9f7d1fff120972ad38f2d",
+            measurementId: "G-C3X3ER73CZ"
+        };
+
+        let app, auth, db;
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            console.log("Firebase initialized successfully");
+        } catch (e) {
+            throw new Error("Firebase Init Failed: " + e.message);
+        }
+
+        // --- Helpers ---
+        const THEME_COLORS = [{ name: 'Yellow', bg: 'bg-themeYellow', text: 'text-themeYellowDark' }, { name: 'Blue', bg: 'bg-themeBlue', text: 'text-themeBlueDark' }];
+        
+        function NavButton({ active, onClick, icon, label, prominent }) {
+            if (prominent) return <button onClick={onClick} className="relative -top-10 z-50 flex flex-col items-center justify-center group shrink-0 mx-1"><div className={`w-20 h-20 rounded-full shadow-glow flex items-center justify-center border-[6px] border-gray-50 transition-transform duration-300 group-hover:scale-105 ${active ? 'bg-gradient-to-br from-pink-400 to-purple-500 text-white' : 'bg-white text-gray-300'}`}>{React.cloneElement(icon, { size: 32, strokeWidth: 3 })}</div></button>;
+            return <button onClick={onClick} className={`flex flex-col items-center justify-center py-1 transition-all relative w-full h-14 rounded-2xl ${active ? 'bg-white shadow-cute text-pink-500 -translate-y-1' : 'text-gray-400 hover:text-gray-600 hover:bg-white/50'}`}>{React.cloneElement(icon, { size: 20, strokeWidth: 2.5 })}<span className="text-[9px] font-bold leading-tight mt-0.5">{label}</span></button>;
+        }
+        function ModalWrapper({ children, onClose, title, icon }) {
+            return <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in"><div className="bg-white rounded-[2.5rem] w-full max-w-sm p-8 shadow-2xl border-4 border-gray-100 relative max-h-[85vh] overflow-y-auto no-scrollbar"><button onClick={onClose} className="absolute top-6 right-6 text-gray-300 hover:text-gray-500 bg-gray-50 p-2 rounded-full"><X size={20}/></button><h2 className="text-2xl font-black text-gray-800 mb-6 flex items-center gap-3">{icon} {title}</h2>{children}</div></div>;
+        }
+
+        // --- AUTH COMPONENT ---
+        const AuthView = () => {
+            const [isRegistering, setIsRegistering] = useState(false);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [rememberMe, setRememberMe] = useState(false);
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault(); setError(''); setLoading(true);
+                try {
+                    await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+                    if (isRegistering) await createUserWithEmailAndPassword(auth, email, password);
+                    else await signInWithEmailAndPassword(auth, email, password);
+                } catch (err) {
+                    setError(err.message.replace('Firebase: ', ''));
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-pink-50 flex flex-col items-center justify-center p-6 text-center">
+                    <div className="bg-white p-8 rounded-[2.5rem] shadow-xl w-full max-w-sm border-4 border-white">
+                        <div className="mb-6 flex justify-center"><Crown size={64} className="text-yellow-400 drop-shadow-sm" /></div>
+                        <h1 className="text-3xl font-black text-gray-800 mb-2">{isRegistering ? 'Create Kingdom' : 'Enter Kingdom'}</h1>
+                        {error && <div className="bg-red-50 text-red-500 p-3 rounded-xl text-xs font-bold mb-4">{error}</div>}
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <input type="email" placeholder="Email" className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 font-bold outline-none" value={email} onChange={e=>setEmail(e.target.value)} required />
+                            <input type="password" placeholder="Password" className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 font-bold outline-none" value={password} onChange={e=>setPassword(e.target.value)} required />
+                            <div className="flex items-center gap-2 justify-start pl-2">
+                                <input type="checkbox" id="remember" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} className="w-5 h-5 rounded border-gray-300 text-pink-500 focus:ring-pink-500" />
+                                <label htmlFor="remember" className="text-sm font-bold text-gray-500">Keep me logged in</label>
+                            </div>
+                            <button type="submit" disabled={loading} className="w-full bg-black text-white py-4 rounded-2xl font-black shadow-cute hover:scale-105 transition-transform flex items-center justify-center gap-2">
+                                {loading ? <Loader2 className="animate-spin"/> : (isRegistering ? 'Sign Up' : 'Log In')}
+                            </button>
+                        </form>
+                        <button onClick={() => setIsRegistering(!isRegistering)} className="mt-6 text-xs font-bold text-gray-400 hover:text-pink-500">{isRegistering ? 'Already have a kingdom? Log In' : 'New here? Create Account'}</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const SetupWizard = ({ onComplete }) => {
+            const [step, setStep] = useState(1);
+            const [data, setData] = useState({ name: '', p1: '', p2: '' });
+            const handleFinish = () => {
+                if(!data.name || !data.p1 || !data.p2) return;
+                onComplete({
+                    castle: { name: data.name, kingdomFlag: '🏰', player1Flag: '👑', player2Flag: '🧢' },
+                    profiles: { player1: { name: data.p1, icon: '👑', theme: 'Yellow' }, player2: { name: data.p2, icon: '🧢', theme: 'Blue' } }
+                });
+            };
+            return (
+                <div className="min-h-screen bg-pink-50 flex flex-col items-center justify-center p-6 text-center">
+                     <div className="bg-white p-8 rounded-[2.5rem] shadow-xl w-full max-w-sm border-4 border-white animate-in zoom-in">
+                        <h2 className="text-2xl font-black text-gray-800 mb-6">Setup Wizard</h2>
+                        {step === 1 && (<div className="space-y-4"><label className="block text-sm font-bold text-gray-400 uppercase">Name your Kingdom</label><input className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 font-black text-xl text-center" placeholder="e.g. The Smith Home" value={data.name} onChange={e=>setData({...data, name:e.target.value})} /><button onClick={() => {if(data.name) setStep(2)}} className="w-full bg-black text-white py-3 rounded-2xl font-bold mt-4">Next</button></div>)}
+                        {step === 2 && (<div className="space-y-4"><label className="block text-sm font-bold text-gray-400 uppercase">Partner 1 Name</label><input className="w-full bg-yellow-50 border-2 border-yellow-200 rounded-2xl p-4 font-black text-xl text-center text-yellow-800" placeholder="You" value={data.p1} onChange={e=>setData({...data, p1:e.target.value})} /><label className="block text-sm font-bold text-gray-400 uppercase mt-4">Partner 2 Name</label><input className="w-full bg-blue-50 border-2 border-blue-200 rounded-2xl p-4 font-black text-xl text-center text-blue-800" placeholder="Them" value={data.p2} onChange={e=>setData({...data, p2:e.target.value})} /><button onClick={handleFinish} className="w-full bg-black text-white py-3 rounded-2xl font-bold mt-4">Start Kingdom!</button></div>)}
+                     </div>
+                </div>
+            );
+        };
+
+        const ProfilePicker = ({ profiles, onSelect, onLogout }) => (
+            <div className="min-h-screen bg-pink-50 flex flex-col items-center justify-center p-6 text-center fade-in">
+                <h1 className="text-4xl font-black text-pink-500 mb-8 drop-shadow-sm">Who is playing?</h1>
+                <div className="flex gap-6 mb-12">
+                    <button onClick={() => onSelect('player1')} className="w-36 h-36 bg-themeYellow rounded-[2rem] shadow-cute border-4 border-white flex flex-col items-center justify-center hover:scale-105 transition-transform"><div className="text-5xl mb-2">{profiles.player1?.icon}</div><span className="text-xl font-black text-themeYellowDark">{profiles.player1?.name}</span></button>
+                    <button onClick={() => onSelect('player2')} className="w-36 h-36 bg-themeBlue rounded-[2rem] shadow-cute border-4 border-white flex flex-col items-center justify-center hover:scale-105 transition-transform"><div className="text-5xl mb-2">{profiles.player2?.icon}</div><span className="text-xl font-black text-themeBlueDark">{profiles.player2?.name}</span></button>
+                </div>
+                <button onClick={onLogout} className="text-gray-400 font-bold text-sm flex items-center gap-2 hover:text-red-400"><LogOut size={16}/> Sign Out</button>
+            </div>
+        );
+
+        // --- GAME COMPONENTS ---
+        const ChoreItem = ({ chore, onToggle, onDelete, isPretty }) => (
+            <div className={`relative bg-white rounded-3xl p-4 shadow-cute border-2 flex items-center gap-4 ${isPretty ? 'border-pink-200 bg-pink-50' : 'border-gray-100'}`}>
+                <button onClick={() => onToggle(chore)} className={`w-10 h-10 rounded-full border-4 flex items-center justify-center ${isPretty ? 'border-pink-200 text-pink-500' : 'border-gray-200 text-transparent hover:text-green-400'}`}><CheckCircle size={22} /></button>
+                <div className="flex-1"><h3 className="font-black text-gray-700 leading-tight">{chore.title}</h3><div className="text-[10px] font-bold text-gray-400 mt-1">{chore.assignedTo === 'player1' ? 'P1' : 'P2'} • {chore.frequency || 'Once'}</div></div>
+                {onDelete && <button onClick={() => onDelete(chore.id)} className="text-gray-300 hover:text-red-400"><Trash2 size={18}/></button>}
+            </div>
+        );
+
+        const CastleView = ({ profiles, completed, settings, onOpenSettings }) => {
+            const p1Score = completed.filter(c => c.completedBy === 'player1').length;
+            const p2Score = completed.filter(c => c.completedBy === 'player2').length;
+            const scoreDiff = p1Score - p2Score;
+            let currentFlag = settings.kingdomFlag || '🏰';
+            let ruler = 'The Kingdom';
+            if (scoreDiff > 5) { currentFlag = settings.player1Flag || '👑'; ruler = `${profiles.player1.name}'s Reign`; }
+            if (scoreDiff < -5) { currentFlag = settings.player2Flag || '🧢'; ruler = `${profiles.player2.name}'s Reign`; }
+            return (
+                <div className="space-y-6">
+                    <div onClick={onOpenSettings} className="bg-white rounded-[2.5rem] p-6 text-center border-4 border-white shadow-lg cursor-pointer">
+                        <div className="h-32 flex items-end justify-center mb-2 relative"><div className="text-6xl animate-float">{currentFlag}</div></div>
+                        <h2 className="text-2xl font-black text-gray-800">{settings.name || 'Our Kingdom'}</h2>
+                        <p className="text-xs font-bold uppercase tracking-widest text-pink-500 mt-1">{ruler}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-yellow-50 rounded-2xl p-4 border border-yellow-100 text-center"><div className="text-2xl mb-1">{profiles.player1.icon}</div><div className="text-3xl font-black text-yellow-800">{p1Score}</div><div className="text-[10px] font-bold text-yellow-600 uppercase">{profiles.player1.name} Deeds</div></div>
+                        <div className="bg-blue-50 rounded-2xl p-4 border border-blue-100 text-center"><div className="text-2xl mb-1">{profiles.player2.icon}</div><div className="text-3xl font-black text-blue-800">{p2Score}</div><div className="text-[10px] font-bold text-blue-600 uppercase">{profiles.player2.name} Deeds</div></div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ListView = ({ chores, onToggle, onDelete, userKey }) => {
+            const myChores = chores.filter(c => c.assignedTo === userKey && c.status !== 'completed');
+            return <div className="space-y-3">{myChores.length === 0 ? <div className="text-center py-10 opacity-50">All done! 🎉</div> : myChores.map(c => <ChoreItem key={c.id} chore={c} onToggle={onToggle} onDelete={onDelete} isPretty={c.isPrettyPlease} />)}</div>;
+        };
+
+        const BudgetView = ({ bills, income, onUpdateIncome, onPayBill }) => {
+            const tot = (Number(income.player1)||0)+(Number(income.player2)||0); 
+            const split = tot>0?(Number(income.player1)/tot):0.5;
+            return (
+                <div className="space-y-6">
+                    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                        <h2 className="text-xs font-bold text-gray-400 uppercase mb-3">Monthly Income</h2>
+                        <div className="flex gap-4 mb-4"><input type="number" className="w-full bg-yellow-50 rounded-lg p-2" value={income.player1} onChange={(e)=>onUpdateIncome({player1:e.target.value})} /><input type="number" className="w-full bg-blue-50 rounded-lg p-2" value={income.player2} onChange={(e)=>onUpdateIncome({player2:e.target.value})} /></div>
+                        <div className="h-4 bg-gray-100 rounded-full flex overflow-hidden"><div style={{width:`${split*100}%`}} className="bg-yellow-300 h-full"></div><div className="flex-1 bg-blue-300 h-full"></div></div>
+                    </div>
+                    <div className="space-y-2">{bills.map(b => <div key={b.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between"><div><div className="font-bold">{b.title}</div><div className="text-xs text-gray-400">${b.totalPaid || 0} / ${b.amount}</div></div><button onClick={()=>onPayBill(b)} className="bg-green-100 text-green-600 px-3 py-1 rounded-lg text-xs font-bold">Pay</button></div>)}</div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP COMPONENT ---
+        function ChoreApp() {
+            const [user, setUser] = useState(null);
+            const [profileKey, setProfileKey] = useState(null);
+            const [tab, setTab] = useState('castle');
+            const [authLoading, setAuthLoading] = useState(true);
+            const [dataLoading, setDataLoading] = useState(true);
+            
+            // Data
+            const [chores, setChores] = useState([]);
+            const [bills, setBills] = useState([]);
+            const [income, setIncome] = useState({ player1: 0, player2: 0 });
+            const [castle, setCastle] = useState(undefined); // undefined = loading, null = not found
+            const [profiles, setProfiles] = useState(undefined);
+            const [modals, setModals] = useState({ chore: false, bill: false, castle: false });
+
+            // Auth Listener
+            useEffect(() => {
+                const unsubscribe = onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    setAuthLoading(false);
+                    if (!u) {
+                        setProfileKey(null);
+                        setCastle(undefined);
+                        setProfiles(undefined);
+                    }
+                });
+                return unsubscribe;
+            }, []);
+
+            // Data Fetcher
+            useEffect(() => {
+                if (!user) { setDataLoading(false); return; }
+                setDataLoading(true);
+                const path = `users/${user.uid}/kingdom`;
+                const subs = [
+                    onSnapshot(collection(db, path, 'data', 'chores'), s => setChores(s.docs.map(d=>({id:d.id,...d.data()})))),
+                    onSnapshot(collection(db, path, 'data', 'bills'), s => setBills(s.docs.map(d=>({id:d.id,...d.data()})))),
+                    onSnapshot(doc(db, path, 'settings', 'castle'), s => { setCastle(s.exists() ? s.data() : null); setDataLoading(false); }),
+                    onSnapshot(doc(db, path, 'settings', 'profiles'), s => setProfiles(s.exists() ? s.data() : null)),
+                    onSnapshot(doc(db, path, 'settings', 'income'), s => setIncome(s.exists() ? s.data() : {player1:0, player2:0})),
+                ];
+                return () => subs.forEach(u => u());
+            }, [user]);
+
+            const act = async (type, col, id, data) => {
+                const path = `users/${user.uid}/kingdom`;
+                if(type==='add') await addDoc(collection(db, path, 'data', col), {...data, createdAt: serverTimestamp()});
+                if(type==='update') await updateDoc(doc(db, path, 'data', col, id), data);
+                if(type==='delete') await deleteDoc(doc(db, path, 'data', col, id));
+                if(type==='set') await setDoc(doc(db, path, 'settings', id), data);
+            };
+
+            const handleSetup = async (data) => {
+                const path = `users/${user.uid}/kingdom`;
+                await setDoc(doc(db, path, 'settings', 'castle'), data.castle);
+                await setDoc(doc(db, path, 'settings', 'profiles'), data.profiles);
+            };
+
+            // Loading States
+            if (authLoading) return <div className="h-screen flex flex-col items-center justify-center bg-pink-50"><Loader2 className="animate-spin text-pink-500" size={48}/><p className="mt-4 text-pink-400 font-bold">Connecting...</p></div>;
+            if (!user) return <AuthView />;
+            if (castle === undefined) return <div className="h-screen flex flex-col items-center justify-center bg-pink-50"><RefreshCw className="animate-spin text-pink-500" size={48}/><p className="mt-4 text-pink-400 font-bold">Loading Kingdom...</p></div>;
+            if (castle === null || profiles === null) return <SetupWizard onComplete={handleSetup} />;
+            if (!profileKey) return <ProfilePicker profiles={profiles} onSelect={setProfileKey} onLogout={()=>signOut(auth)} />;
+
+            const partnerKey = profileKey === 'player1' ? 'player2' : 'player1';
+            const profile = profiles[profileKey];
+            const myTheme = THEME_COLORS.find(c => c.name === profile.theme) || THEME_COLORS[0];
+
+            return (
+                <div className={`h-[100dvh] w-full flex flex-col font-sans max-w-md mx-auto shadow-2xl overflow-hidden relative fade-in ${myTheme.bg} transition-colors duration-500`}>
+                    <header className="bg-white/80 backdrop-blur-md p-5 pt-safe-top pb-4 shadow-sm z-10 flex justify-between items-center select-none rounded-b-[2.5rem] sticky top-0">
+                        <div className="flex items-center gap-3"><div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-2xl shadow-sm border-2 border-gray-100">{profile.icon}</div><div><h1 className="text-xl font-black text-gray-800 tracking-tight">{tab.charAt(0).toUpperCase() + tab.slice(1)}</h1><button onClick={() => setProfileKey(null)} className="text-xs text-gray-400 font-bold flex items-center gap-1"><ArrowLeft size={10}/> Switch</button></div></div>
+                        <div className="flex gap-2">
+                             <button onClick={() => setModals({...modals, [tab === 'budget' ? 'bill' : (tab === 'castle' ? 'castle' : 'chore')]: true})} className="w-12 h-12 bg-black text-white rounded-2xl flex items-center justify-center shadow-cute hover:scale-110 transition-transform active:scale-90"><Plus size={28} strokeWidth={3}/></button>
+                        </div>
+                    </header>
+                    
+                    <main className="flex-1 overflow-y-auto p-4 pb-40 relative no-scrollbar">
+                        {tab === 'castle' && <CastleView profiles={profiles} completed={chores.filter(c=>c.status==='completed')} settings={castle} onOpenSettings={() => setModals({...modals, castle: true})} />}
+                        {tab === 'list' && <ListView chores={chores} onToggle={(c)=>act('update','chores',c.id,{status:'completed', completedBy: profileKey})} onDelete={(id)=>act('delete','chores',id)} userKey={profileKey} />}
+                        {tab === 'budget' && <BudgetView bills={bills} income={income} onUpdateIncome={(d)=>act('set','settings','income',{...income,...d})} onPayBill={(b)=>act('update','bills',b.id,{totalPaid: (b.totalPaid||0)+10})} />}
+                    </main>
+
+                    <div className="fixed bottom-0 left-0 right-0 w-full px-4 pb-6 pt-12 z-40 flex justify-between items-end pointer-events-none safe-area-pb">
+                        <div className="bg-white/95 backdrop-blur-md rounded-[2.5rem] p-1.5 grid grid-cols-2 gap-1 shadow-xl border-4 border-white pointer-events-auto w-[42%]">
+                            <NavButton active={tab === 'list'} onClick={() => setTab('list')} icon={<CheckCircle />} label="Chores" />
+                            <NavButton active={tab === 'budget'} onClick={() => setTab('budget')} icon={<PiggyBank />} label="Budget" />
+                        </div>
+                        <div className="pointer-events-auto -mb-6 mx-2 z-50 transform -translate-y-6"><NavButton active={tab === 'castle'} onClick={() => setTab('castle')} icon={<Crown />} label="Kingdom" prominent={true} /></div>
+                        <div className="bg-white/95 backdrop-blur-md rounded-[2.5rem] p-1.5 grid grid-cols-2 gap-1 shadow-xl border-4 border-white pointer-events-auto w-[42%]">
+                            <NavButton active={false} onClick={() => alert('Coming soon!')} icon={<Target />} label="Goals" />
+                            <NavButton active={false} onClick={() => alert('Coming soon!')} icon={<Gift />} label="Rewards" />
+                        </div>
+                    </div>
+
+                    {/* Modals */}
+                    {modals.chore && <ModalWrapper onClose={() => setModals({...modals, chore: false})} title="New Chore" icon={<CheckSquare size={24}/>}>
+                        <form onSubmit={(e) => { e.preventDefault(); const t = e.target.title.value; if(t) act('add','chores',null,{title:t, assignedTo: profileKey, status: 'pending'}); setModals({...modals, chore: false}); }} className="space-y-4">
+                            <input name="title" className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 font-bold" placeholder="Chore name" autoFocus />
+                            <div className="flex gap-2"><button type="button" onClick={()=>{act('add','chores',null,{title:document.querySelector('input[name=title]').value, assignedTo: profileKey, status: 'pending'}); setModals({...modals, chore:false})}} className="flex-1 bg-yellow-400 py-3 rounded-xl font-bold">Me</button><button type="button" onClick={()=>{act('add','chores',null,{title:document.querySelector('input[name=title]').value, assignedTo: partnerKey, status: 'pending'}); setModals({...modals, chore:false})}} className="flex-1 bg-blue-400 py-3 rounded-xl font-bold">Partner</button></div>
+                        </form>
+                    </ModalWrapper>}
+                    
+                    {modals.bill && <ModalWrapper onClose={() => setModals({...modals, bill: false})} title="New Bill" icon={<DollarSign size={24}/>}>
+                        <form onSubmit={(e) => { e.preventDefault(); const t = e.target.title.value; const a = e.target.amount.value; if(t && a) act('add','bills',null,{title:t, amount: parseFloat(a), totalPaid: 0}); setModals({...modals, bill: false}); }} className="space-y-4">
+                            <input name="title" className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 font-bold" placeholder="Bill name" autoFocus />
+                            <input name="amount" type="number" className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 font-bold" placeholder="Amount ($)" />
+                            <button className="w-full bg-green-500 text-white py-3 rounded-xl font-bold shadow-cute">Add Bill</button>
+                        </form>
+                    </ModalWrapper>}
+                    
+                    {modals.castle && <ModalWrapper onClose={() => setModals({...modals, castle: false})} title="Settings" icon={<Settings size={24}/>}>
+                         <div className="space-y-4">
+                            <input value={castle.name} onChange={(e) => setCastle({...castle, name: e.target.value})} className="w-full bg-gray-50 border-2 border-gray-200 rounded-2xl p-4 font-bold" />
+                            <button onClick={() => { act('set', 'settings', 'castle', castle); setModals({...modals, castle: false}); }} className="w-full bg-black text-white py-3 rounded-xl font-bold">Save</button>
+                         </div>
+                    </ModalWrapper>}
+                </div>
+            );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<ChoreApp />);
+    </script>
+</body>
+</html>
